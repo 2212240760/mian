@@ -52,3 +52,4 @@ tzdata==2025.2
 urllib3==2.4.0
 watchdog==6.0.0
 pip==25.1.1
+xlrd==2.0.1
