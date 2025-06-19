@@ -59,6 +59,17 @@ def init_database():
     )
     ''')
 
+    # 创建能力提升计划表
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS improvement_plans (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        leader_id INTEGER,
+        dimension TEXT NOT NULL,
+        target_score INTEGER,
+        FOREIGN KEY (leader_id) REFERENCES grid_leaders (id)
+    )
+    ''')
+
     conn.commit()
     conn.close()
 
@@ -136,6 +147,39 @@ def add_assessment(leader_id, date, scores):
                    VALUES (?,?,?,?,?,?,?)''',
         (leader_id, date, scores["专业技术能力"], scores["指标掌控能力"],
          scores["管理执行能力"], scores["沟通协调能力"], scores["市场营销能力"])
+    )
+    conn.commit()
+    conn.close()
+
+
+def update_assessment(assessment_id, scores):
+    """修改评估记录"""
+    # 验证分数是否在 0 到 100 之间
+    for score in scores.values():
+        if score < 0 or score > 100:
+            st.error("分数必须在 0 到 100 之间，请重新输入。")
+            return
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        '''UPDATE assessments 
+           SET professional_skill = ?, index_mastery = ?, 
+               management_execution = ?, communication_coordination = ?, marketing_ability = ?
+           WHERE id = ?''',
+        (scores["专业技术能力"], scores["指标掌控能力"],
+         scores["管理执行能力"], scores["沟通协调能力"], scores["市场营销能力"], assessment_id)
+    )
+    conn.commit()
+    conn.close()
+
+
+def save_improvement_plan(leader_id, dimension, target_score):
+    """保存能力提升计划"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        'INSERT INTO improvement_plans (leader_id, dimension, target_score) VALUES (?,?,?)',
+        (leader_id, dimension, target_score)
     )
     conn.commit()
     conn.close()
@@ -237,9 +281,13 @@ IMPROVEMENT_TIPS = {
 with st.sidebar:
     st.header("网格长管理")
     leaders = get_all_leaders()
+    leader_names = [leader["name"] for leader in leaders]
+    search_term = st.text_input("搜索网格长")
+    if search_term:
+        leader_names = [name for name in leader_names if search_term.lower() in name.lower()]
     selected_name = st.selectbox(
         "选择网格长",
-        options=[leader["name"] for leader in leaders]
+        options=leader_names
     )
 
     # 获取当前选中网格长
@@ -266,6 +314,62 @@ with st.sidebar:
             new_scores
         )
         st.success(f"{selected_name}的评估数据已更新！")
+
+    st.divider()
+    st.subheader("修改评估数据")
+    assessments = get_leader_assessments(leader_id)
+    if assessments:
+        assessment_dates = [assessment["date"] for assessment in assessments]
+        selected_date = st.selectbox("选择评估日期", assessment_dates)
+        selected_assessment = next((a for a in assessments if a["date"] == selected_date), None)
+        if selected_assessment:
+            edit_scores = {}
+            # 映射中文维度名称到数据库列名
+            dim_to_db_col = {
+                "专业技术能力": "professional_skill",
+                "指标掌控能力": "index_mastery",
+                "管理执行能力": "management_execution",
+                "沟通协调能力": "communication_coordination",
+                "市场营销能力": "marketing_ability"
+            }
+            for dim in DIMENSIONS:
+                # 使用正确的列名从数据库记录中获取值
+                db_col_name = dim_to_db_col[dim]
+                edit_scores[dim] = st.slider(
+                    f"{dim}得分",
+                    min_value=0, max_value=100,
+                    value=selected_assessment[db_col_name],
+                    key=f"edit_{dim}"
+                )
+            if st.button("保存修改"):
+                update_assessment(selected_assessment["id"], edit_scores)
+                st.success(f"{selected_name}在{selected_date}的评估数据已更新！")
+
+    st.divider()
+    st.subheader("导入Excel数据")
+    uploaded_file = st.file_uploader("选择Excel文件", type=["xlsx", "xls"])
+    if uploaded_file is not None:
+        try:
+            df = pd.read_excel(uploaded_file)
+            for index, row in df.iterrows():
+                name = row["姓名"]
+                area = row["辖区"]
+                date = str(row["评估日期"])
+                scores = {
+                    "专业技术能力": row["专业技术能力"],
+                    "指标掌控能力": row["指标掌控能力"],
+                    "管理执行能力": row["管理执行能力"],
+                    "沟通协调能力": row["沟通协调能力"],
+                    "市场营销能力": row["市场营销能力"]
+                }
+                leader = get_leader_by_name(name)
+                if leader is None:
+                    add_leader(name, area)
+                    leader = get_leader_by_name(name)
+                add_assessment(leader["id"], date, scores)
+            st.success("数据导入成功！")
+        except Exception as e:
+            st.error(f"数据导入失败: {e}")
 
 # 主显示区
 assessments = get_leader_assessments(leader_id)
@@ -368,44 +472,47 @@ if current_scores:
                     min_value=score, max_value=100,
                     value=min(100, score + 15), key=dim
                 )
+                if st.button(f"保存{dim}提升目标"):
+                    save_improvement_plan(leader_id, dim, target)
+                    st.success(f"{dim}提升目标已保存！")
 
-    # 历史趋势分析
-    st.divider()
-    st.subheader("能力发展轨迹")
-    if len(assessments) > 1:
-        history_data = []
-        for assessment in assessments:
-            history_data.append({
-                "date": assessment["date"],
-                "专业技术能力": assessment["professional_skill"],
-                "指标掌控能力": assessment["index_mastery"],
-                "管理执行能力": assessment["management_execution"],
-                "沟通协调能力": assessment["communication_coordination"],
-                "市场营销能力": assessment["marketing_ability"],
-                "综合得分": sum(
-                    assessment[dim] * WEIGHTS[dim]
-                    for dim in DIMENSIONS
-                )
-            })
+# 历史趋势分析
+st.divider()
+st.subheader("能力发展轨迹")
+if len(assessments) > 1:
+    history_data = []
+    for assessment in assessments:
+        # 修改这里，使用正确的列名
+        score_dict = {
+            "date": assessment["date"],
+            "专业技术能力": assessment["professional_skill"],
+            "指标掌控能力": assessment["index_mastery"],
+            "管理执行能力": assessment["management_execution"],
+            "沟通协调能力": assessment["communication_coordination"],
+            "市场营销能力": assessment["marketing_ability"],
+        }
+        score_dict["综合得分"] = sum(
+            score_dict[dim] * WEIGHTS[dim]
+            for dim in DIMENSIONS
+        )
+        history_data.append(score_dict)
 
-        history_df = pd.DataFrame(history_data)
-        history_df = history_df.set_index("date")
+    history_df = pd.DataFrame(history_data)
+    history_df = history_df.set_index("date")
 
-        # 趋势图
-        tab1, tab2 = st.tabs(["维度趋势", "综合趋势"])
-        with tab1:
-            selected_dims = st.multiselect(
-                "选择观察维度",
-                DIMENSIONS, default=DIMENSIONS[:2]
-            )
-            st.line_chart(history_df[selected_dims])
+    # 趋势图
+    tab1, tab2 = st.tabs(["维度趋势", "综合趋势"])
+    with tab1:
+        selected_dims = st.multiselect(
+            "选择观察维度",
+            DIMENSIONS, default=DIMENSIONS[:2]
+        )
+        st.line_chart(history_df[selected_dims])
 
-        with tab2:
-            st.line_chart(history_df["综合得分"])
-    else:
-        st.info("至少需要2次评估数据才能显示趋势分析")
+    with tab2:
+        st.line_chart(history_df["综合得分"])
 else:
-    st.warning("该网格长暂无评估数据")
+    st.info("至少需要2次评估数据才能显示趋势分析")
 
 # 数据管理功能
 st.sidebar.divider()
@@ -450,6 +557,7 @@ if st.sidebar.button("重置示例数据"):
     cursor = conn.cursor()
     cursor.execute('DELETE FROM assessments')
     cursor.execute('DELETE FROM grid_leaders')
+    cursor.execute('DELETE FROM improvement_plans')
     conn.commit()
     conn.close()
 
@@ -485,6 +593,30 @@ def compare_leaders():
     )
     st.plotly_chart(fig, use_container_width=True)
 
+    # 柱状图对比综合得分
+    leader_scores = []
+    for leader in leaders:
+        assessments = get_leader_assessments(leader["id"])
+        if assessments:
+            current_scores = {
+                "专业技术能力": assessments[0]["professional_skill"],
+                "指标掌控能力": assessments[0]["index_mastery"],
+                "管理执行能力": assessments[0]["management_execution"],
+                "沟通协调能力": assessments[0]["communication_coordination"],
+                "市场营销能力": assessments[0]["marketing_ability"]
+            }
+            total_score = sum(
+                current_scores[dim] * WEIGHTS[dim]
+                for dim in DIMENSIONS
+            )
+            leader_scores.append({
+                "name": leader["name"],
+                "score": total_score
+            })
+    score_df = pd.DataFrame(leader_scores)
+    fig_bar = px.bar(score_df, x="name", y="score", title="不同网格长综合得分对比")
+    st.plotly_chart(fig_bar, use_container_width=True)
+
 
 # 智能诊断报告
 def generate_report():
@@ -505,15 +637,25 @@ def generate_report():
             p.drawString(100, y_position, f"网格长: {leader['name']} - {leader['area']}")
             y_position -= 20
 
+            # 映射数据库列名到中文维度名称
+            score_mapping = {
+                "专业技术能力": current_scores["professional_skill"],
+                "指标掌控能力": current_scores["index_mastery"],
+                "管理执行能力": current_scores["management_execution"],
+                "沟通协调能力": current_scores["communication_coordination"],
+                "市场营销能力": current_scores["marketing_ability"]
+            }
+
+            # 计算综合得分
             total_score = sum(
-                current_scores[dim] * WEIGHTS[dim]
+                score_mapping[dim] * WEIGHTS[dim]
                 for dim in DIMENSIONS
             )
             p.drawString(100, y_position, f"综合得分: {total_score:.1f}")
             y_position -= 20
 
             for dim in DIMENSIONS:
-                p.drawString(100, y_position, f"{dim}: {current_scores[dim]}分")
+                p.drawString(100, y_position, f"{dim}: {score_mapping[dim]}分")
                 y_position -= 20
             y_position -= 30
 
