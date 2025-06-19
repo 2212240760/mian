@@ -347,7 +347,7 @@ with st.sidebar:
 
     st.divider()
     st.subheader("导入Excel数据")
-    uploaded_file = st.file_uploader("选择Excel文件", type=["xlsx", "xls"])
+    uploaded_file = st.file_uploader("选择Excel文件", type=["xlsx", "xls","csv"])
     if uploaded_file is not None:
         try:
             df = pd.read_excel(uploaded_file)
@@ -370,6 +370,33 @@ with st.sidebar:
             st.success("数据导入成功！")
         except Exception as e:
             st.error(f"数据导入失败: {e}")
+def read_excel_file(file_path):
+    """读取Excel文件，自动处理格式问题"""
+    try:
+        # 尝试使用openpyxl读取.xlsx文件
+        df = pd.read_excel(file_path, engine='openpyxl')
+        print("成功使用openpyxl读取文件")
+        return df
+    except Exception as e:
+        print(f"使用openpyxl失败: {e}")
+        try:
+            # 尝试使用xlrd读取.xls文件
+            df = pd.read_excel(file_path, engine='xlrd')
+            print("成功使用xlrd读取文件")
+            return df
+        except Exception as e2:
+            print(f"使用xlrd失败: {e2}")
+            print("请检查文件格式或路径是否正确")
+            return None
+
+# 使用示例
+file_path = 'your_data.xlsx'
+df = read_excel_file(file_path)
+
+if df is not None:
+    print(f"数据基本信息：")
+    df.info()
+
 
 # 主显示区
 assessments = get_leader_assessments(leader_id)
