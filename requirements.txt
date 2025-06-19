@@ -21,10 +21,10 @@ mysql==0.0.3
 mysql-connector-python==9.3.0
 mysqlclient==2.2.7
 narwhals==1.42.1
-numpy==2.2.6
-openpyxl==3.1.5
+numpy==1.26.4
+openpyxl==4.0.0
 packaging==24.2
-pandas==2.2.3
+pandas==2.1.4
 pefile==2023.2.7
 pillow==11.2.1
 plotly==6.1.2
@@ -43,7 +43,7 @@ rpds-py==0.25.1
 setuptools==80.9.0
 six==1.17.0
 smmap==5.0.2
-streamlit==1.45.1
+streamlit==1.26.0
 tenacity==9.1.2
 toml==0.10.2
 tornado==6.5.1
